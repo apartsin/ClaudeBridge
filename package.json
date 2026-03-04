@@ -15,6 +15,10 @@
   "jest": {
     "testEnvironment": "jsdom",
     "transform": {},
+    "testPathIgnorePatterns": [
+      "/node_modules/",
+      "/tests/e2e/"
+    ],
     "moduleNameMapper": {
       "^chrome$": "<rootDir>/tests/mocks/chrome.mock.js"
     }

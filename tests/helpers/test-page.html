@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="application-name" content="TestApp">
+  <meta property="og:site_name" content="Test Site">
+  <title>Test Page for ClaudeBridge</title>
+</head>
+<body>
+  <h1>Test Heading</h1>
+
+  <div contenteditable="true" id="editor">
+    <h2>Section Title</h2>
+    <p>First paragraph with some text.</p>
+    <p>Second paragraph with different text.</p>
+    <ul>
+      <li>List item one</li>
+      <li>List item two</li>
+    </ul>
+    <blockquote>A quoted block of text.</blockquote>
+    <pre>code block content</pre>
+  </div>
+
+  <div contenteditable="true" id="editor-2">
+    <p>Another editable region paragraph.</p>
+  </div>
+
+  <textarea id="text-area">Some textarea content</textarea>
+  <input type="text" id="text-input" value="Input value" />
+
+  <div id="non-editable">This is not editable</div>
+
+  <button id="save-btn">Save</button>
+  <button aria-label="Publish changes">Publish</button>
+</body>
+</html>

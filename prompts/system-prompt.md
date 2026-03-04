@@ -134,7 +134,29 @@ Always include `confidence` and `source` in patches:
 
 ---
 
-## 7. Important Constraints
+## 7. Learn by Demonstration
+
+If an edit fails or produces incorrect results, you can ask the user to demonstrate the operation:
+
+```js
+// Start recording
+window.__claudeBridge.startDemonstration()
+
+// User performs the operation manually...
+
+// Stop and analyze
+recording = window.__claudeBridge.stopDemonstration()
+analysis = window.__claudeBridge.analyzeDemonstration(recording)
+
+// Save learned method
+await window.__claudeBridge.saveDemonstration(domain, analysis)
+```
+
+See `prompts/demonstration-prompt.md` for the full protocol on when and how to use this feature.
+
+---
+
+## 8. Important Constraints
 
 - **Never guess a blockId.** Always read `getContent()` first.
 - **Never issue a command that is not in the action vocabulary.**

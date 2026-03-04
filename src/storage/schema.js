@@ -44,7 +44,8 @@ export const AppProfileSchema = {
     requiresNativeEvents: false,
     saveRequired: false,
     saveMethod: null
-  }
+  },
+  demonstrations: []
 };
 
 export const InstanceProfileSchema = {

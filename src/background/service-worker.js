@@ -26,6 +26,48 @@ chrome.runtime.onInstalled.addListener(async (details) => {
   console.log(`${LOG_PREFIX} Storage initialization complete`);
 });
 
+// ─── Auto-Activation Listener ─────────────────────────────────────────────────
+// Injects the content script when a page finishes loading, ensuring the bridge
+// activates without requiring the side panel to be open. This handles cases
+// where declarative content_scripts may not fire (e.g., already-open tabs when
+// the extension is installed or updated).
+
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab.url) return;
+
+  // Only inject on http/https pages
+  if (!tab.url.startsWith('http://') && !tab.url.startsWith('https://')) return;
+
+  // Skip chrome:// and extension pages
+  if (tab.url.startsWith('chrome://') || tab.url.startsWith('chrome-extension://')) return;
+
+  try {
+    // Check if bridge is already injected
+    const results = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => document.body?.getAttribute('data-claude-bridge')
+    });
+
+    const bridgeStatus = results?.[0]?.result;
+    if (bridgeStatus === 'ready' || bridgeStatus === 'error') {
+      // Bridge already present, skip
+      return;
+    }
+
+    // Inject content script
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      files: ['dist/content.js']
+    });
+
+    console.log(`${LOG_PREFIX} Auto-injected bridge into tab ${tabId}: ${tab.url}`);
+  } catch (err) {
+    // Silently ignore injection failures (e.g., restricted pages)
+    // This is expected for pages like chrome://settings
+  }
+});
+
 // ─── Message Handler ───────────────────────────────────────────────────────────
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
@@ -79,6 +121,12 @@ async function handleMessage(message, sender) {
 
     case "STORAGE_IMPORT":
       return handleImport(message);
+
+    case "STORAGE_SAVE_DEMONSTRATION":
+      return handleSaveDemonstration(message);
+
+    case "STORAGE_GET_DEMONSTRATIONS":
+      return handleGetDemonstrations(message);
 
     case "GET_STATUS":
       return handleGetStatus();
@@ -192,6 +240,94 @@ async function handleImport(message) {
 
   await StorageManager.importAll(data, true);
   return { success: true };
+}
+
+/**
+ * STORAGE_SAVE_DEMONSTRATION: Save a demonstration analysis to the app profile.
+ * Message shape: { type: "STORAGE_SAVE_DEMONSTRATION", domain: string, demonstration: object }
+ * Response: { success: true }
+ */
+async function handleSaveDemonstration(message) {
+  const { domain, demonstration } = message;
+  console.log(`${LOG_PREFIX} STORAGE_SAVE_DEMONSTRATION domain="${domain}"`);
+
+  const profile = await StorageManager.getAppProfile(domain);
+  if (!profile) {
+    throw new Error(`No app profile found for domain "${domain}"`);
+  }
+
+  const demonstrations = profile.demonstrations || [];
+  demonstrations.push({
+    timestamp: Date.now(),
+    actionType: demonstration.actions?.[0]?.type || 'unknown',
+    summary: demonstration.summary || '',
+    learnedMethod: {
+      steps: demonstration.editMethod?.details?.steps || [],
+      confidence: demonstration.confidence || 'tentative',
+      source: 'demonstration'
+    }
+  });
+
+  // Cap demonstrations at 20
+  if (demonstrations.length > 20) {
+    demonstrations.splice(0, demonstrations.length - 20);
+  }
+
+  // Build actions patch with learnedMethod
+  const actionsPatch = {};
+  if (demonstration.actions) {
+    for (const action of demonstration.actions) {
+      const actionKey = action.type === 'text_edit' ? 'replace_text'
+        : action.type === 'text_replace' ? 'replace_text'
+        : action.type === 'format_change' ? 'set_format'
+        : action.type === 'block_insert' ? 'insert_block'
+        : action.type === 'block_delete' ? 'delete_block'
+        : null;
+
+      if (actionKey) {
+        actionsPatch[actionKey] = {
+          method: demonstration.editMethod?.primary || 'unknown',
+          confidence: demonstration.confidence || 'tentative',
+          learnedMethod: {
+            steps: demonstration.editMethod?.details?.steps || [],
+            confidence: demonstration.confidence || 'tentative',
+            source: 'demonstration'
+          }
+        };
+      }
+    }
+  }
+
+  const patch = { demonstrations };
+  if (Object.keys(actionsPatch).length > 0) {
+    patch.actions = actionsPatch;
+  }
+  if (demonstration.selectors) {
+    patch.selectors = { blocks: demonstration.selectors };
+  }
+  if (demonstration.quirks && demonstration.quirks.length > 0) {
+    patch.quirks = [...(profile.quirks || []), ...demonstration.quirks];
+  }
+
+  await StorageManager.updateAppProfile(domain, patch, {
+    source: 'demonstration',
+    note: `Learned from demonstration: ${demonstration.summary || 'user demonstration'}`
+  });
+
+  return { success: true };
+}
+
+/**
+ * STORAGE_GET_DEMONSTRATIONS: Retrieve demonstrations for a domain.
+ * Message shape: { type: "STORAGE_GET_DEMONSTRATIONS", domain: string }
+ * Response: { demonstrations: array }
+ */
+async function handleGetDemonstrations(message) {
+  const { domain } = message;
+  console.log(`${LOG_PREFIX} STORAGE_GET_DEMONSTRATIONS domain="${domain}"`);
+
+  const profile = await StorageManager.getAppProfile(domain);
+  return { demonstrations: (profile && profile.demonstrations) || [] };
 }
 
 /**

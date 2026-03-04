@@ -112,6 +112,38 @@ const StorageClient = {
   },
 
   /**
+   * Save a demonstration analysis to the app profile.
+   *
+   * @param {string} domain - The domain to save the demonstration for.
+   * @param {object} demonstration - The analyzed demonstration data.
+   * @returns {Promise<object>} - { success: true } on success.
+   */
+  async saveDemonstration(domain, demonstration) {
+    console.log(LOG_PREFIX, 'saveDemonstration:', domain);
+    const response = await sendMessage({
+      type: 'STORAGE_SAVE_DEMONSTRATION',
+      domain,
+      demonstration
+    });
+    return response;
+  },
+
+  /**
+   * Get saved demonstrations for a domain.
+   *
+   * @param {string} domain - The domain to look up.
+   * @returns {Promise<Array>} - Array of saved demonstrations.
+   */
+  async getDemonstrations(domain) {
+    console.log(LOG_PREFIX, 'getDemonstrations:', domain);
+    const response = await sendMessage({
+      type: 'STORAGE_GET_DEMONSTRATIONS',
+      domain
+    });
+    return (response && response.demonstrations) || [];
+  },
+
+  /**
    * Get the current extension status from the service worker.
    *
    * @returns {Promise<object>} - Status object { version, profileCount, instanceCount }.

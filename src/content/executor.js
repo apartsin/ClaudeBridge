@@ -41,6 +41,15 @@ export class Executor {
     }
     this._adapter = adapter;
     this._extractor = extractor;
+    this._effectiveProfile = null;
+  }
+
+  /**
+   * Set the effective profile for learned method lookups.
+   * @param {object} profile - The merged app + instance profile.
+   */
+  setProfile(profile) {
+    this._effectiveProfile = profile;
   }
 
   /**
@@ -83,6 +92,25 @@ export class Executor {
 
     const options = command.options || {};
     const validateBefore = options.validateBefore !== false; // default true
+
+    // Try learned method first (if available in profile)
+    if (!options.dryRun && this._effectiveProfile) {
+      const actions = this._effectiveProfile.actions;
+      const learnedMethod = actions && actions[action] && actions[action].learnedMethod;
+      if (learnedMethod && learnedMethod.steps && learnedMethod.steps.length > 0) {
+        console.log(LOG_PREFIX, `Trying learned method for "${action}"...`);
+        try {
+          const learnedResult = this._tryLearnedMethod(command, learnedMethod);
+          if (learnedResult && learnedResult.success) {
+            console.log(LOG_PREFIX, `Learned method succeeded for "${action}"`);
+            return learnedResult;
+          }
+          console.log(LOG_PREFIX, `Learned method failed for "${action}", falling back to adapter`);
+        } catch (err) {
+          console.warn(LOG_PREFIX, `Learned method threw for "${action}":`, err.message);
+        }
+      }
+    }
 
     // For actions that don't need a target block
     if (action === 'save') {
@@ -664,6 +692,130 @@ export class Executor {
     }
 
     return this._error(`Text "${findText}" not found in any block`, 'find_and_replace');
+  }
+
+  // ---------------------------------------------------------------------------
+  // Learned method execution
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Try to execute a command using a learned method from demonstration.
+   * Replays recorded DOM operation steps: focus, select, type, key events.
+   *
+   * @param {Command} command
+   * @param {object} learnedMethod - { steps: Array, confidence: string }
+   * @returns {ExecuteResult|null}
+   */
+  _tryLearnedMethod(command, learnedMethod) {
+    const { steps } = learnedMethod;
+    if (!steps || steps.length === 0) return null;
+
+    // Resolve target element if command has a target
+    let targetElement = null;
+    if (command.target) {
+      const block = this._resolveTarget(command.target);
+      if (block) {
+        targetElement = this._getBlockElement(block.id);
+      }
+    }
+
+    for (const step of steps) {
+      try {
+        switch (step.type) {
+          case 'focus': {
+            const el = targetElement || this._findElement(step.selector);
+            if (el) el.focus();
+            break;
+          }
+          case 'selectAll': {
+            const el = targetElement || this._findElement(step.selector);
+            if (el) {
+              el.focus();
+              document.execCommand('selectAll', false, null);
+            }
+            break;
+          }
+          case 'insertText': {
+            const text = command.value || step.value || '';
+            document.execCommand('insertText', false, text);
+            break;
+          }
+          case 'keydown':
+          case 'keyup':
+          case 'keypress': {
+            const el = targetElement || document.activeElement;
+            if (el) {
+              el.dispatchEvent(new KeyboardEvent(step.type, {
+                key: step.key || '',
+                code: step.code || '',
+                ctrlKey: step.ctrlKey || false,
+                shiftKey: step.shiftKey || false,
+                altKey: step.altKey || false,
+                metaKey: step.metaKey || false,
+                bubbles: true,
+                cancelable: true
+              }));
+            }
+            break;
+          }
+          case 'input': {
+            const el = targetElement || document.activeElement;
+            if (el) {
+              el.dispatchEvent(new InputEvent('input', {
+                bubbles: true,
+                cancelable: true,
+                inputType: step.inputType || 'insertText',
+                data: command.value || step.data || ''
+              }));
+            }
+            break;
+          }
+          case 'click': {
+            const el = this._findElement(step.selector);
+            if (el) el.click();
+            break;
+          }
+          case 'setValue': {
+            const el = targetElement || this._findElement(step.selector);
+            if (el) {
+              if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+                el.value = command.value || step.value || '';
+              } else {
+                el.textContent = command.value || step.value || '';
+              }
+              el.dispatchEvent(new Event('input', { bubbles: true }));
+              el.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            break;
+          }
+          default:
+            console.warn(LOG_PREFIX, `Unknown learned step type: "${step.type}"`);
+        }
+      } catch (err) {
+        console.warn(LOG_PREFIX, `Learned step "${step.type}" failed:`, err.message);
+        return null;
+      }
+    }
+
+    // If we got here without throwing, assume success
+    const blockId = command.target?.blockId || null;
+    return this._result(true, command.action, blockId, {
+      warning: 'Executed via learned method from demonstration'
+    });
+  }
+
+  /**
+   * Find a DOM element by CSS selector (for learned method replay).
+   * @param {string} selector
+   * @returns {Element|null}
+   */
+  _findElement(selector) {
+    if (!selector) return null;
+    try {
+      return document.querySelector(selector);
+    } catch (_) {
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------

@@ -16,6 +16,7 @@ import StorageClient from './storage-client.js';
 import { Extractor } from './extractor.js';
 import { Executor } from './executor.js';
 import { Explorer } from './explorer.js';
+import { DemonstrationRecorder, DemonstrationAnalyzer } from './demonstrator.js';
 
 // Adapter imports — these will be loaded based on detected app
 import { GoogleSitesAdapter } from './adapters/google-sites.js';
@@ -439,6 +440,8 @@ async function initBridge() {
   const extractor = new Extractor(adapter);
   const executor = new Executor(adapter, extractor);
   const explorer = new Explorer(adapter);
+  const demonstrationRecorder = new DemonstrationRecorder();
+  const demonstrationAnalyzer = new DemonstrationAnalyzer();
 
   // Step 4a: Auto-explore on first visit (no profile exists)
   // This learns the editor structure and saves it for future visits.
@@ -531,6 +534,9 @@ async function initBridge() {
 
   // Build context from loaded profile (or auto-exploration results)
   const activeProfile = profileLoaded ? (mergeProfiles(appProfile, instanceProfile)) : effectiveProfile;
+
+  // Give the executor access to the profile so it can use learned methods
+  executor.setProfile(activeProfile);
   const context = {
     knownBlocks: (activeProfile.selectors && activeProfile.selectors.blocks)
       ? Object.entries(activeProfile.selectors.blocks).map(([type, entry]) => ({
@@ -665,6 +671,56 @@ async function initBridge() {
         return result;
       } catch (err) {
         console.error(LOG_PREFIX, 'explore failed:', err);
+        throw err;
+      }
+    },
+
+    // Demonstration methods
+    startDemonstration: (options) => {
+      console.log(LOG_PREFIX, 'Starting demonstration recording...', options);
+      try {
+        return demonstrationRecorder.start(options);
+      } catch (err) {
+        console.error(LOG_PREFIX, 'startDemonstration failed:', err);
+        return { status: 'error', error: err.message };
+      }
+    },
+
+    stopDemonstration: () => {
+      console.log(LOG_PREFIX, 'Stopping demonstration recording...');
+      try {
+        return demonstrationRecorder.stop();
+      } catch (err) {
+        console.error(LOG_PREFIX, 'stopDemonstration failed:', err);
+        return { status: 'error', error: err.message };
+      }
+    },
+
+    getDemonstrationStatus: () => {
+      try {
+        return demonstrationRecorder.getStatus();
+      } catch (err) {
+        return { recording: false, error: err.message };
+      }
+    },
+
+    analyzeDemonstration: (recording) => {
+      console.log(LOG_PREFIX, 'Analyzing demonstration...');
+      try {
+        return demonstrationAnalyzer.analyze(recording);
+      } catch (err) {
+        console.error(LOG_PREFIX, 'analyzeDemonstration failed:', err);
+        return { error: err.message };
+      }
+    },
+
+    saveDemonstration: async (targetDomain, analysis) => {
+      console.log(LOG_PREFIX, 'Saving demonstration for:', targetDomain);
+      try {
+        await StorageClient.saveDemonstration(targetDomain, analysis);
+        console.log(LOG_PREFIX, 'Demonstration saved for:', targetDomain);
+      } catch (err) {
+        console.error(LOG_PREFIX, 'saveDemonstration failed:', err);
         throw err;
       }
     },

@@ -35,20 +35,28 @@
    - 9.2 [Update Rules](#92-update-rules)
    - 9.3 [Confidence System](#93-confidence-system)
    - 9.4 [Changelog](#94-changelog)
-10. [Claude System Prompts](#10-claude-system-prompts)
-    - 10.1 [Claude in Chrome — Persistent System Prompt](#101-claude-in-chrome--persistent-system-prompt)
-    - 10.2 [Knowledge Update Prompt Rules](#102-knowledge-update-prompt-rules)
-    - 10.3 [Exploration Prompt](#103-exploration-prompt)
-11. [Tests](#11-tests)
-    - 11.1 [Unit Tests](#111-unit-tests)
-    - 11.2 [Integration Tests](#112-integration-tests)
-    - 11.3 [End-to-End Tests](#113-end-to-end-tests)
-12. [Installation Instructions](#12-installation-instructions)
-13. [Development Setup](#13-development-setup)
-14. [Build & Packaging](#14-build--packaging)
-15. [Security Considerations](#15-security-considerations)
-16. [Known Limitations & Mitigations](#16-known-limitations--mitigations)
-17. [Future Extensions](#17-future-extensions)
+10. [Learn by Demonstration](#10-learn-by-demonstration)
+    - 10.1 [Overview](#101-overview)
+    - 10.2 [DemonstrationRecorder](#102-demonstrationrecorder)
+    - 10.3 [DemonstrationAnalyzer](#103-demonstrationanalyzer)
+    - 10.4 [Storage Extensions](#104-storage-extensions)
+    - 10.5 [Bridge API Extensions](#105-bridge-api-extensions)
+    - 10.6 [Executor Integration](#106-executor-integration)
+11. [Claude System Prompts](#11-claude-system-prompts)
+    - 11.1 [Claude in Chrome — Persistent System Prompt](#111-claude-in-chrome--persistent-system-prompt)
+    - 11.2 [Knowledge Update Prompt Rules](#112-knowledge-update-prompt-rules)
+    - 11.3 [Exploration Prompt](#113-exploration-prompt)
+    - 11.4 [Demonstration Prompt](#114-demonstration-prompt)
+12. [Tests](#12-tests)
+    - 12.1 [Unit Tests](#121-unit-tests)
+    - 12.2 [Integration Tests](#122-integration-tests)
+    - 12.3 [End-to-End Tests](#123-end-to-end-tests)
+13. [Installation Instructions](#13-installation-instructions)
+14. [Development Setup](#14-development-setup)
+15. [Build & Packaging](#15-build--packaging)
+16. [Security Considerations](#16-security-considerations)
+17. [Known Limitations & Mitigations](#17-known-limitations--mitigations)
+18. [Future Extensions](#18-future-extensions)
 
 ---
 
@@ -1281,11 +1289,228 @@ Claude can query the changelog and explain its knowledge provenance when asked.
 
 ---
 
-## 10. Claude System Prompts
+## 10. Learn by Demonstration
+
+### 10.1 Overview
+
+Learn by Demonstration allows users to teach Claude how to edit a specific web editor by performing operations manually while the bridge observes DOM mutations and browser events. The learned knowledge is saved to the app/instance profile and used on future visits.
+
+**Use case**: When Claude encounters an editor where auto-exploration alone cannot determine the correct edit method, the user can demonstrate a single operation (e.g., editing text, applying formatting) and the bridge records exactly what happened at the DOM level.
+
+**Workflow**:
+1. User (or Claude) initiates demonstration mode via `window.__claudeBridge.startDemonstration()`
+2. The bridge attaches MutationObservers and event listeners to all editable regions
+3. User performs the operation (e.g., selects text, types new text, applies bold)
+4. User (or Claude) stops recording via `window.__claudeBridge.stopDemonstration()`
+5. Claude analyzes the recording via `window.__claudeBridge.analyzeDemonstration(recording)`
+6. Claude saves learned knowledge via `window.__claudeBridge.saveDemonstration(domain, analysis)`
+7. On future visits, the executor tries the learned method before falling back to the adapter
+
+**File:** `src/content/demonstrator.js`
+
+---
+
+### 10.2 DemonstrationRecorder
+
+Records user interactions with editable DOM regions.
+
+```javascript
+class DemonstrationRecorder {
+  start(options) → { status, startTime, editableRegions }
+  stop() → DemonstrationRecording
+  isRecording() → boolean
+  getStatus() → { recording, eventCount, mutationCount, elapsed, remaining }
+}
+```
+
+**Events captured**: `input`, `keydown`, `keyup`, `click`, `mousedown`, `mouseup`, `paste`, `cut`, `copy`, `focus`, `blur`, `compositionstart`, `compositionend`, `beforeinput`
+
+**Mutations captured**: Via MutationObserver with config `{ childList: true, subtree: true, characterData: true, attributes: true, attributeOldValue: true, characterDataOldValue: true }`
+
+**Limits**:
+- Maximum 500 events per recording
+- Maximum 60 seconds recording duration
+- Auto-stops when limits are reached
+
+**Recording format**:
+```typescript
+interface DemonstrationRecording {
+  events: RecordedEvent[];
+  mutations: RecordedMutation[];
+  duration: number;
+  metadata: {
+    startTime: number;
+    endTime: number;
+    url: string;
+    editableRegions: number;
+    initialSnapshot: object;
+    finalSnapshot: object;
+  };
+  status: 'stopped';
+}
+
+interface RecordedEvent {
+  type: string;
+  timestamp: number;           // relative to recording start
+  target: {
+    tagName: string;
+    id: string;
+    className: string;
+    selector: string;          // computed unique CSS selector path
+    isEditable: boolean;
+    contentBefore: string;
+  };
+  data: object;                // event-type-specific payload
+}
+
+interface RecordedMutation {
+  timestamp: number;
+  type: 'childList' | 'characterData' | 'attributes';
+  target: { tagName: string; selector: string };
+  details: object;
+}
+```
+
+---
+
+### 10.3 DemonstrationAnalyzer
+
+Analyzes raw recordings into structured knowledge that can be saved to profiles.
+
+```javascript
+class DemonstrationAnalyzer {
+  analyze(recording) → DemonstrationAnalysis
+}
+```
+
+**Analysis output**:
+```typescript
+interface DemonstrationAnalysis {
+  actions: DetectedDemoAction[];
+  editMethod: {
+    primary: 'execCommand' | 'directDOM' | 'keyboard' | 'frameworkAPI';
+    details: object;
+    confidence: string;
+  };
+  selectors: Record<string, SelectorEntry>;
+  quirks: QuirkEntry[];
+  confidence: 'tentative' | 'inferred';
+  summary: string;            // human-readable summary
+}
+
+interface DetectedDemoAction {
+  type: 'text_edit' | 'text_replace' | 'format_change' | 'block_insert' | 'block_delete' | 'save' | 'paste';
+  description: string;
+  confidence: string;
+}
+```
+
+**Analysis steps**:
+1. **Action detection** — Classify event sequences into action types (text edit, format change, block operations, save, paste)
+2. **Edit method detection** — Determine how edits were applied (execCommand, direct DOM, keyboard, framework API) by examining mutation patterns
+3. **Selector extraction** — Collect unique CSS selectors from event targets, grouped by apparent block type
+4. **Quirk detection** — Identify delays, event sequences, IME requirements, or editor-specific behaviors
+5. **Summary generation** — Create human-readable description of what was demonstrated
+
+---
+
+### 10.4 Storage Extensions
+
+**AppProfileSchema additions**:
+```javascript
+{
+  // Existing fields...
+  demonstrations: [
+    {
+      timestamp: "number",
+      actionType: "string",
+      summary: "string",
+      learnedMethod: {
+        steps: "array",        // ordered list of DOM operations
+        confidence: "string",
+        source: "demonstration"
+      }
+    }
+  ]
+}
+```
+
+**ActionEntry additions**:
+```javascript
+{
+  method: "string",
+  details: "object",
+  confidence: "string",
+  learnedMethod: {             // NEW: populated from demonstration
+    steps: "array",
+    confidence: "tentative|inferred",
+    source: "demonstration"
+  }
+}
+```
+
+**Service worker message handlers**:
+- `STORAGE_SAVE_DEMONSTRATION` — Saves a demonstration analysis to the app profile
+- `STORAGE_GET_DEMONSTRATIONS` — Retrieves saved demonstrations for a domain
+
+---
+
+### 10.5 Bridge API Extensions
+
+New methods on `window.__claudeBridge`:
+
+```typescript
+// Start recording user interactions
+startDemonstration(options?: { targetSelector?: string; maxEvents?: number; maxDuration?: number })
+  → { status: 'recording'; startTime: number; editableRegions: number }
+
+// Stop recording and return raw data
+stopDemonstration()
+  → DemonstrationRecording
+
+// Check recording status
+getDemonstrationStatus()
+  → { recording: boolean; eventCount: number; mutationCount: number; elapsed: number; remaining: number }
+
+// Analyze a recording into structured knowledge
+analyzeDemonstration(recording: DemonstrationRecording)
+  → DemonstrationAnalysis
+
+// Save analyzed demonstration to profile
+saveDemonstration(domain: string, analysis: DemonstrationAnalysis)
+  → Promise<void>
+```
+
+---
+
+### 10.6 Executor Integration
+
+When executing a command, the executor checks for a `learnedMethod` in the effective profile for the current action:
+
+```javascript
+execute(command) {
+  // 1. Try learned method first (if available in profile)
+  const learnedMethod = profile.actions[action]?.learnedMethod;
+  if (learnedMethod) {
+    const result = this._tryLearnedMethod(command, learnedMethod);
+    if (result.success) return result;
+    // Fall through to adapter on failure
+  }
+
+  // 2. Fall back to adapter
+  return this._executeViaAdapter(command);
+}
+```
+
+The `_tryLearnedMethod` replays the recorded DOM operation steps: focus, select, type, dispatch keyboard events, etc.
+
+---
+
+## 11. Claude System Prompts
 
 These are the exact prompts to configure Claude in Chrome.
 
-### 10.1 Claude in Chrome — Persistent System Prompt
+### 11.1 Claude in Chrome — Persistent System Prompt
 
 **File:** `prompts/system-prompt.md`
 
@@ -1360,7 +1585,7 @@ If window.__claudeBridge.profileLoaded === false:
 
 ---
 
-### 10.2 Knowledge Update Prompt Rules
+### 11.2 Knowledge Update Prompt Rules
 
 **File:** `prompts/knowledge-rules.md`
 
@@ -1420,7 +1645,7 @@ After every update, tell the user:
 
 ---
 
-### 10.3 Exploration Prompt
+### 11.3 Exploration Prompt
 
 **File:** `prompts/exploration-prompt.md`
 
@@ -1473,9 +1698,21 @@ When window.__claudeBridge.profileLoaded === false, run this protocol:
 
 ---
 
-## 11. Tests
+### 11.4 Demonstration Prompt
 
-### 11.1 Unit Tests
+**File:** `prompts/demonstration-prompt.md`
+
+Guides Claude on when and how to use Learn by Demonstration:
+- When to suggest demonstration mode (edit failures, unknown editors, user request)
+- How to instruct users during recording
+- How to interpret analysis results
+- When to update vs. replace existing learned knowledge
+
+---
+
+## 12. Tests
+
+### 12.1 Unit Tests
 
 **Framework:** Jest + jsdom
 
@@ -1554,9 +1791,25 @@ When window.__claudeBridge.profileLoaded === false, run this protocol:
 // Test: suggestedEditMethod matches detected editor framework
 ```
 
+**File:** `tests/unit/demonstrator.test.js`
+```javascript
+// Test: DemonstrationRecorder starts and stops correctly
+// Test: Recorder captures input events with correct format
+// Test: Recorder captures mutations via MutationObserver
+// Test: Recorder respects maxEvents limit
+// Test: Recorder auto-stops after maxDuration
+// Test: Recorder returns correct recording format with metadata
+// Test: DemonstrationAnalyzer detects text_edit actions
+// Test: Analyzer detects format_change actions (Ctrl+B, etc.)
+// Test: Analyzer detects edit method from mutation patterns
+// Test: Analyzer generates selectors from event targets
+// Test: Analyzer detects quirks (slow editor, IME, mutation bursts)
+// Test: Analyzer generates human-readable summary
+```
+
 ---
 
-### 11.2 Integration Tests
+### 12.2 Integration Tests
 
 **File:** `tests/integration/bridge-api.test.js`
 ```javascript
@@ -1582,9 +1835,18 @@ When window.__claudeBridge.profileLoaded === false, run this protocol:
 // Test: conflicting update to confirmed item does NOT auto-apply
 ```
 
+**File:** `tests/integration/demonstration-flow.test.js`
+```javascript
+// Test: Start recording → capture events → stop recording → get recording
+// Test: Analyze recording → get structured analysis with actions and edit method
+// Test: Save demonstration to profile → profile updated with learnedMethod
+// Test: Execute command → learned method tried first → falls back to adapter on failure
+// Test: Multiple demonstrations merge correctly into profile
+```
+
 ---
 
-### 11.3 End-to-End Tests
+### 12.3 End-to-End Tests
 
 **Framework:** Playwright with Chrome extension loading
 
@@ -1631,7 +1893,7 @@ When window.__claudeBridge.profileLoaded === false, run this protocol:
 
 ---
 
-## 12. Installation Instructions
+## 13. Installation Instructions
 
 ### User Installation (from Chrome Web Store — future)
 1. Visit the Chrome Web Store page for Claude Bridge
@@ -1684,7 +1946,7 @@ npm run build
 
 ---
 
-## 13. Development Setup
+## 14. Development Setup
 
 **File:** `package.json`
 
@@ -1771,7 +2033,7 @@ npm run build
 
 ---
 
-## 14. Build & Packaging
+## 15. Build & Packaging
 
 **File:** `scripts/package-extension.js`
 
@@ -1804,7 +2066,7 @@ Icons can be placeholder colored squares for development. Generate them programm
 
 ---
 
-## 15. Security Considerations
+## 16. Security Considerations
 
 ### Prompt Injection Risk
 The extension reads page content and passes it to Claude. Malicious page content could attempt to inject instructions to Claude.
@@ -1827,7 +2089,7 @@ Profiles stored in chrome.storage.local could be tampered with if another extens
 
 ---
 
-## 16. Known Limitations & Mitigations
+## 17. Known Limitations & Mitigations
 
 | Limitation | Impact | Mitigation |
 |-----------|--------|-----------|
@@ -1841,7 +2103,7 @@ Profiles stored in chrome.storage.local could be tampered with if another extens
 
 ---
 
-## 17. Future Extensions
+## 18. Future Extensions
 
 The following are explicitly out of scope for v1.0 but the architecture should not preclude them:
 
