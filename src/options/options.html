@@ -1,0 +1,88 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Bridge — Options</title>
+  <link rel="stylesheet" href="options.css">
+</head>
+<body>
+  <header class="options-header">
+    <h1>&#128268; Claude Bridge</h1>
+    <span class="header-subtitle">Profile Manager</span>
+  </header>
+
+  <main class="options-layout">
+    <!-- ─── Left Sidebar ──────────────────────────────────────────────────── -->
+    <aside class="sidebar">
+      <div class="sidebar-group">
+        <div class="sidebar-heading">
+          <h2>App Profiles</h2>
+          <button id="btn-add-app" class="btn-icon" title="Add new App Profile">+</button>
+        </div>
+        <ul id="list-apps" class="profile-list"></ul>
+      </div>
+
+      <div class="sidebar-group">
+        <div class="sidebar-heading">
+          <h2>Instance Profiles</h2>
+          <button id="btn-add-instance" class="btn-icon" title="Add new Instance Profile">+</button>
+        </div>
+        <ul id="list-instances" class="profile-list"></ul>
+      </div>
+    </aside>
+
+    <!-- ─── Right Detail Panel ────────────────────────────────────────────── -->
+    <section class="detail-panel">
+      <div id="detail-empty" class="detail-placeholder">
+        <p>Select a profile from the sidebar to view or edit it.</p>
+      </div>
+
+      <div id="detail-content" class="detail-content" hidden>
+        <div class="detail-header">
+          <h2 id="detail-title"></h2>
+          <span id="detail-type" class="type-badge"></span>
+        </div>
+
+        <div class="detail-meta">
+          <span>Domain: <strong id="detail-domain"></strong></span>
+          <span>Confidence: <strong id="detail-confidence"></strong></span>
+          <span>Updated: <strong id="detail-updated"></strong></span>
+          <span>Updates: <strong id="detail-update-count"></strong></span>
+        </div>
+
+        <!-- Editable fields -->
+        <div class="field-group">
+          <label for="field-selectors">Selectors / Deltas</label>
+          <textarea id="field-selectors" class="json-editor" rows="10" spellcheck="false"></textarea>
+        </div>
+
+        <div class="field-group">
+          <label for="field-actions">Actions</label>
+          <textarea id="field-actions" class="json-editor" rows="8" spellcheck="false"></textarea>
+        </div>
+
+        <div class="field-group">
+          <label for="field-quirks">Quirks</label>
+          <textarea id="field-quirks" class="json-editor" rows="5" spellcheck="false"></textarea>
+        </div>
+
+        <!-- Read-only changelog -->
+        <div class="field-group">
+          <label>Changelog <span class="label-hint">(read-only)</span></label>
+          <div id="field-changelog" class="changelog-view"></div>
+        </div>
+
+        <!-- Action buttons -->
+        <div class="detail-actions">
+          <button id="btn-save" class="btn btn-primary">Save</button>
+          <button id="btn-delete" class="btn btn-danger">Delete</button>
+          <button id="btn-export-single" class="btn btn-secondary">Export</button>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <script src="options.js" type="module"></script>
+</body>
+</html>

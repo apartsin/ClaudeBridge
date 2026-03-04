@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Claude Bridge</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header class="popup-header">
+    <h1>&#128268; Claude Bridge</h1>
+  </header>
+
+  <section class="status-section">
+    <div class="status-row">
+      <span class="status-label">Status</span>
+      <span id="status-indicator" class="status-badge inactive">Inactive</span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">App</span>
+      <span id="app-name" class="status-value">--</span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">Profile</span>
+      <span id="profile-status" class="status-value">--</span>
+    </div>
+    <div class="status-row">
+      <span class="status-label">Blocks</span>
+      <span id="block-count" class="status-value">--</span>
+    </div>
+  </section>
+
+  <section class="actions-section">
+    <button id="btn-view-profile" class="btn btn-primary" disabled>View Profile</button>
+    <button id="btn-edit-profile" class="btn btn-secondary" disabled>Edit Profile</button>
+    <button id="btn-export" class="btn btn-secondary">Export</button>
+    <button id="btn-import" class="btn btn-secondary">Import</button>
+    <input type="file" id="import-file" accept=".json" hidden>
+  </section>
+
+  <footer class="popup-footer">
+    <div class="footer-stats">
+      <span>Apps: <strong id="known-apps">0</strong></span>
+      <span>Instances: <strong id="known-instances">0</strong></span>
+    </div>
+    <a id="link-options" href="#" class="footer-link">Open Options</a>
+  </footer>
+
+  <script src="popup.js" type="module"></script>
+</body>
+</html>
