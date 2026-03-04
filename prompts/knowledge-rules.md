@@ -1,6 +1,8 @@
 # Claude Bridge — Knowledge Update Rules
 
-When you learn something new about how a web application works — a selector, an edit method, a quirk, a workaround — you may propose a knowledge update to the bridge's profile system. Follow these rules strictly.
+Claude Bridge learns and remembers how **every web editor** works. When you discover something new about any web application — a selector, an edit method, a quirk, a workaround — update the bridge's knowledge system so it works better on future visits. This applies to ALL apps, not just known ones like Google Sites or Docs.
+
+**Always update knowledge proactively.** Every interaction with an editor is an opportunity to improve the bridge's understanding. Don't wait to be asked — if you notice something useful, save it.
 
 ---
 
@@ -85,6 +87,15 @@ Every patch must include:
 - A selector override is needed because this specific page diverges from the app default.
 - A custom block type or layout element exists only on this instance.
 - User-specific configuration affects the DOM structure for this page.
+
+### When to Update After a Failed Edit
+
+- An edit command failed: record what failed and what alternative worked.
+- A selector returned no matches: record the working selector.
+- The save mechanism was different than expected: update the save method.
+- The editor required a different approach (keyboard sim vs execCommand): update the edit method.
+
+**Always learn from failures.** Every failed edit is valuable knowledge.
 
 ### When NOT to Update
 

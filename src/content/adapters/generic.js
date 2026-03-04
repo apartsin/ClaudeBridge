@@ -182,30 +182,54 @@ export class GenericAdapter extends AdapterBase {
 
   /** @override */
   _blockToJson(element, index) {
-    const type   = element.__cbType || 'text';
-    const prefix = TYPE_PREFIX[type] || TYPE_PREFIX.unknown;
-    const id     = `${prefix}-${index}`;
+    const rawType = element.__cbType || 'text';
+    const prefix  = TYPE_PREFIX[rawType] || TYPE_PREFIX.unknown;
+    const id      = `${prefix}-${index}`;
+
+    // Normalize type to match the standard BlockType enum used by Extractor
+    let type = rawType;
+    if (rawType === 'heading') {
+      const level = this._headingLevel(element);
+      type = level <= 3 ? `heading${level}` : 'heading3';
+    } else if (rawType === 'text' || rawType === 'textarea' || rawType === 'input') {
+      type = 'paragraph';
+    } else if (rawType === 'code') {
+      type = 'paragraph';
+    } else if (rawType === 'blockquote') {
+      type = 'paragraph';
+    }
+
+    // Extract text and html separately (Extractor expects both)
+    const contentValue = this._extractContent(element, rawType);
+    const text = (rawType === 'textarea' || rawType === 'input')
+      ? (element.value || '')
+      : (element.textContent || '');
+    const html = (rawType === 'textarea' || rawType === 'input')
+      ? (element.value || '')
+      : (element.innerHTML || '');
 
     const block = {
       id,
       type,
-      content: this._extractContent(element, type),
+      text,
+      html,
+      content: contentValue,
       index,
     };
 
     const attrs = {};
 
-    if (type === 'heading') {
+    if (rawType === 'heading') {
       attrs.level = this._headingLevel(element);
     }
-    if (type === 'image') {
+    if (rawType === 'image') {
       const img = element.tagName === 'IMG' ? element : element.querySelector('img');
       if (img) {
         attrs.src = img.getAttribute('src') || '';
         attrs.alt = img.getAttribute('alt') || '';
       }
     }
-    if (type === 'textarea' || type === 'input') {
+    if (rawType === 'textarea' || rawType === 'input') {
       attrs.name        = element.getAttribute('name') || '';
       attrs.placeholder = element.getAttribute('placeholder') || '';
     }

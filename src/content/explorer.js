@@ -222,11 +222,65 @@ export class Explorer {
    * @returns {string}
    */
   _detectAppName(domain) {
-    if (domain === 'sites.google.com') return 'Google Sites';
-    if (domain === 'docs.google.com') return 'Google Docs';
-    if (domain.includes('notion.so')) return 'Notion';
+    // Well-known editors
+    const KNOWN_APPS = {
+      'sites.google.com': 'Google Sites',
+      'docs.google.com': 'Google Docs',
+      'sheets.google.com': 'Google Sheets',
+      'slides.google.com': 'Google Slides',
+      'notion.so': 'Notion',
+      'www.notion.so': 'Notion',
+      'wordpress.com': 'WordPress',
+      'medium.com': 'Medium',
+      'ghost.io': 'Ghost',
+      'webflow.io': 'Webflow',
+      'squarespace.com': 'Squarespace',
+      'wix.com': 'Wix',
+      'editor.wix.com': 'Wix Editor',
+      'app.contentful.com': 'Contentful',
+      'airtable.com': 'Airtable',
+      'coda.io': 'Coda',
+      'quip.com': 'Quip',
+      'paper.dropbox.com': 'Dropbox Paper',
+      'github.com': 'GitHub',
+      'gitlab.com': 'GitLab',
+    };
+
+    if (KNOWN_APPS[domain]) return KNOWN_APPS[domain];
+
+    // Partial domain matches
+    for (const [key, name] of Object.entries(KNOWN_APPS)) {
+      if (domain.includes(key) || domain.endsWith('.' + key)) return name;
+    }
     if (domain.includes('confluence')) return 'Confluence';
-    return 'Unknown Editor';
+    if (domain.includes('jira')) return 'Jira';
+
+    // Page metadata heuristics
+    try {
+      const ogSiteName = document.querySelector('meta[property="og:site_name"]');
+      if (ogSiteName && ogSiteName.content) return ogSiteName.content;
+
+      const appNameMeta = document.querySelector('meta[name="application-name"]');
+      if (appNameMeta && appNameMeta.content) return appNameMeta.content;
+
+      const generator = document.querySelector('meta[name="generator"]');
+      if (generator && generator.content) {
+        const gen = generator.content.toLowerCase();
+        if (gen.includes('wordpress')) return 'WordPress';
+        if (gen.includes('drupal')) return 'Drupal';
+        if (gen.includes('joomla')) return 'Joomla';
+        if (gen.includes('ghost')) return 'Ghost';
+        return generator.content.split(/[\s\/]/)[0];
+      }
+
+      // URL-based heuristics
+      const path = window.location.pathname.toLowerCase();
+      if (path.includes('/wp-admin')) return 'WordPress';
+    } catch (_) { /* ignore */ }
+
+    // Derive readable name from domain
+    const mainPart = domain.replace(/^www\./, '').split('.').slice(-2, -1)[0] || domain;
+    return mainPart.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
   }
 
   /**

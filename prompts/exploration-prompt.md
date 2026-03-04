@@ -1,114 +1,124 @@
 # Claude Bridge — First Visit Exploration Protocol
 
-When you arrive on a page where the bridge is active but **no profile exists** for the current application or instance, follow this protocol to learn the page structure and create an initial profile.
+Claude Bridge works with **any web editor**. When you arrive on a page where the bridge is active, it automatically explores and learns the editor structure. This protocol describes how that learning works and how you should interact with it.
 
 ---
 
-## 1. Inform the User
+## 1. Automatic First-Visit Learning
 
-Before running any exploration, let the user know:
+When no profile exists for the current application, the bridge **automatically**:
 
-> This is my first time seeing this web application through the bridge. I will run a quick exploration to learn its structure. This will take a moment — I will not make any changes to the page.
+1. Scans the DOM for editable regions (contenteditable, textareas, inputs, rich-text editors)
+2. Detects editor frameworks (Quill, ProseMirror, CKEditor, TinyMCE, or raw contenteditable)
+3. Identifies block types (headings, paragraphs, lists, images, tables, etc.)
+4. Detects save mechanisms (publish buttons, save buttons, auto-save)
+5. Records quirks (Shadow DOM, React/Vue reactivity, iframe editing, etc.)
+6. Saves an **App Profile** for the domain (applies to all pages on this domain)
+7. Saves an **Instance Profile** for this specific page (page-specific structure)
 
----
-
-## 2. Run Exploration
-
-Call `explore()` to get the full block map. The bridge will:
-
-- Scan the DOM for editable regions.
-- Identify block types (headings, paragraphs, images, lists, tables, embeds, etc.).
-- Detect the edit mode (contentEditable, textarea, custom editor framework).
-- Catalog available toolbar actions, save buttons, and other interactive elements.
-- Record CSS selectors for each discovered element type.
-
-The result is a structured report containing:
-- `blocks` — Array of discovered blocks with `blockId`, `type`, `selector`, and `textPreview`.
-- `editMode` — How the editor works (contentEditable, input fields, framework-specific API).
-- `toolbar` — Detected toolbar elements and their actions.
-- `pageContainer` — The root container selector for editable content.
-- `quirks` — Any unusual behaviors or patterns detected during exploration.
+**You do not need to trigger this manually.** The bridge does it before you interact.
 
 ---
 
-## 3. Review Results
+## 2. Inform the User
 
-Analyze the exploration results before saving:
+On first visit to an unknown app, tell the user:
 
-- **Block coverage**: Are all visible content blocks accounted for? If the page shows 10 paragraphs but explore() found 7, note the gap.
-- **Selector reliability**: Do the selectors look stable (class-based, id-based) or fragile (nth-child, deeply nested paths)?
-- **Edit method**: Is the edit approach clear? contentEditable, execCommand, framework API?
-- **Missing elements**: Are there interactive elements (buttons, widgets, embeds) that explore() did not categorize?
+> This is my first time working with [app name] through Claude Bridge. The bridge has already explored the editor structure. Let me check what it learned.
 
-If the exploration seems incomplete, you may run targeted DOM queries to fill gaps. Do not guess — use actual DOM inspection.
+Then call `window.__claudeBridge.getProfile()` and review the results.
 
 ---
 
-## 4. Save Learned Profile
+## 3. Review and Supplement
 
-Based on the exploration results, construct and save two profiles:
+After the auto-exploration, verify the results are adequate:
 
-### App Profile
+- **Block coverage**: Does `getContent()` return all visible content blocks? If the page shows content that wasn't captured, run `explore()` again.
+- **Edit method**: Try a small edit to verify the detected edit method works.
+- **Quirks**: Note any unusual behaviors and save them with `flagQuirk()`.
 
-Create an App Profile for the domain with:
-- `appName` — A human-readable name for the application (e.g., "Google Sites", "Notion", "WordPress").
-- `selectors.blocks` — Selectors for each discovered block type.
-- `selectors.pageContainer` — The root content container.
-- `selectors.editModeDetection` — How to detect whether the page is in edit mode.
-- `selectors.toolbar` — Toolbar selector, if found.
-- `selectors.saveButton` — Save button selector, if found.
-- `actions` — Discovered edit actions with their methods.
-- `editMethod.primary` — The primary edit mechanism.
-- `editMethod.requiresNativeEvents` — Whether edits require simulated native events.
-- `editMethod.saveRequired` — Whether the user must explicitly save.
-- `editMethod.saveMethod` — How to save (button click, keyboard shortcut, auto-save).
-- `quirks` — Any quirks discovered during exploration.
+If the auto-exploration missed things, supplement it:
 
-Set all selector confidences to `tentative` for a first exploration. They will be promoted as they are validated in future sessions.
+```js
+// Run a fresh exploration
+result = await window.__claudeBridge.explore()
 
-### Instance Profile
+// Save additional app-level knowledge
+await window.__claudeBridge.updateAppKnowledge(domain, {
+  selectors: result.suggestedSelectors,
+  editMethod: { primary: result.suggestedEditMethod },
+  quirks: result.suggestedQuirks.map(q => ({
+    description: q, confidence: "tentative", source: "claude"
+  }))
+})
 
-Create an Instance Profile with:
-- `instanceId` — Derived from the current URL using the bridge's normalization rules.
-- `domain` — The parent domain (matching the App Profile).
-- `deltas` — Any instance-specific overrides discovered. For a first visit, this may be empty or contain page-specific layout details.
+// Save instance-level structure
+await window.__claudeBridge.updateInstanceKnowledge(instanceId, {
+  structure: {
+    totalBlocks: result.detectedBlocks.reduce((sum, b) => sum + b.count, 0),
+    blockTypes: Object.fromEntries(
+      result.detectedBlocks.map(b => [b.type, b.count])
+    ),
+    lastScanned: Date.now()
+  }
+})
+```
 
 ---
 
-## 5. Inform the User of Results
+## 4. Report to User
 
-After saving, provide a summary:
+After exploration (whether automatic or manual), summarize:
 
 > **Exploration complete.** Here is what I learned:
 >
 > - **Application**: [App Name]
-> - **Edit mode**: [contentEditable / textarea / framework]
+> - **Edit mode**: [contentEditable / textarea / framework name]
 > - **Blocks found**: [N] ([types list])
-> - **Toolbar detected**: [Yes/No]
 > - **Save method**: [Auto-save / Manual button / Keyboard shortcut]
 > - **Quirks**: [List any, or "None detected"]
-> - **Profiles saved**: App Profile for `[domain]`, Instance Profile for `[instanceId]`
+> - **Profile saved**: This knowledge will load automatically on future visits.
 >
 > I am ready to help you edit this page. What would you like to change?
+
+---
+
+## 5. Continuous Learning
+
+As you work with the editor, keep learning:
+
+- **If an edit method fails**: Try alternatives, then update the profile with what works.
+- **If you discover a new quirk**: Save it with `flagQuirk()`.
+- **If selectors change**: Update the app profile with new selectors.
+- **If the user tells you something**: Save it as `confirmed` knowledge.
+
+Every update is logged in the changelog and persists across sessions.
 
 ---
 
 ## 6. Edge Cases
 
 ### Page is not in edit mode
-If the page appears to be in view mode (not editing), inform the user:
-
 > The page does not appear to be in edit mode. I can see the content but may not be able to make changes. Please switch to edit mode and I will re-explore.
 
 ### Exploration returns no blocks
-If `explore()` finds zero blocks, the page may not be a supported editor. Inform the user:
+> The bridge could not detect any editable blocks on this page. This could mean:
+> - The page is in view mode (not editing)
+> - The editor uses a non-standard approach not yet recognized
+> - The page may need to load more before editing is available
+>
+> Can you confirm this is an editor page? I can try alternative detection methods.
 
-> The bridge could not detect any editable blocks on this page. This application may not be supported yet, or the page may need to be in a different state. Can you confirm this is an editor page?
-
-### Profile already exists
-If a profile already exists (this is a revisit, not a first visit), skip the full exploration protocol. Instead, do a quick validation:
-
+### Profile already exists but seems wrong
+If a profile exists but editing fails, run a fresh exploration and compare:
 1. Run `explore()`.
 2. Compare results to the saved profile.
-3. If they match, proceed normally.
-4. If there are discrepancies, inform the user and propose a profile update following the knowledge update rules.
+3. If there are discrepancies, update the profile and inform the user.
+
+### Unknown editor framework
+If no known framework is detected, the bridge falls back to raw contenteditable/textarea editing. This works for most web editors. If it doesn't:
+1. Check if the editor uses Shadow DOM (elements may not be accessible)
+2. Check if the editor uses iframes (need to focus the iframe first)
+3. Try keyboard simulation as a last resort
+4. Report what you find so the profile can be updated

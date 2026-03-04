@@ -27,6 +27,9 @@ const VERSION = '1.0.0';
 
 /**
  * Map of hostname patterns to adapter classes.
+ * Sites not in this map use the GenericAdapter, which auto-detects
+ * editor frameworks (Quill, ProseMirror, CKEditor, TinyMCE) and
+ * falls back to raw contenteditable/textarea/input editing.
  */
 const ADAPTER_MAP = {
   'sites.google.com': {
@@ -199,9 +202,9 @@ function injectStatusPanel(config) {
     transition: 'opacity 0.2s ease'
   });
 
-  const profileStatus = config.profileLoaded ? 'loaded' : 'first visit';
-  const profileIcon = config.profileLoaded ? '\u2713' : '\u26A0';
-  const appStatus = config.profileLoaded ? '\u2713' : '\u26A0 Exploring...';
+  const profileStatus = config.profileLoaded ? 'loaded' : 'auto-learned';
+  const profileIcon = config.profileLoaded ? '\u2713' : '\u2713';
+  const appStatus = config.profileLoaded ? '\u2713' : '\u2713 Auto-learned';
 
   panel.innerHTML = `
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
@@ -359,10 +362,33 @@ async function initBridge() {
   console.log(LOG_PREFIX, 'Initializing...');
 
   // Step 1: Detect app from hostname
+  // For known apps, use the pre-configured adapter. For everything else,
+  // use GenericAdapter which works with any editable web page.
   const hostname = window.location.hostname;
   const adapterInfo = ADAPTER_MAP[hostname] || null;
-  const appName = adapterInfo ? adapterInfo.appName : 'Generic Editor';
   const domain = hostname;
+
+  // Derive a readable app name for unknown domains
+  let appName;
+  if (adapterInfo) {
+    appName = adapterInfo.appName;
+  } else {
+    // Try page metadata first, then derive from domain
+    const ogSiteName = document.querySelector('meta[property="og:site_name"]');
+    const appNameMeta = document.querySelector('meta[name="application-name"]');
+    const generator = document.querySelector('meta[name="generator"]');
+    if (ogSiteName && ogSiteName.content) {
+      appName = ogSiteName.content;
+    } else if (appNameMeta && appNameMeta.content) {
+      appName = appNameMeta.content;
+    } else if (generator && generator.content) {
+      appName = generator.content.split(/[\s\/]/)[0];
+    } else {
+      // Derive from domain: "app.example.com" → "Example"
+      const mainPart = hostname.replace(/^www\./, '').split('.').slice(-2, -1)[0] || hostname;
+      appName = mainPart.replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+    }
+  }
   const instanceId = normalizeInstanceId(window.location.href);
 
   console.log(LOG_PREFIX, `Detected app: ${appName} | Domain: ${domain} | Instance: ${instanceId}`);
@@ -381,7 +407,7 @@ async function initBridge() {
   }
 
   const effectiveProfile = mergeProfiles(appProfile, instanceProfile);
-  const profileStatus = profileLoaded ? 'loaded' : 'exploring';
+  let profileStatus = profileLoaded ? 'loaded' : 'first-visit';
   const profileVersion = (appProfile && appProfile.version) || null;
 
   console.log(LOG_PREFIX, `Profile status: ${profileStatus} | Version: ${profileVersion}`);
@@ -414,6 +440,86 @@ async function initBridge() {
   const executor = new Executor(adapter, extractor);
   const explorer = new Explorer(adapter);
 
+  // Step 4a: Auto-explore on first visit (no profile exists)
+  // This learns the editor structure and saves it for future visits.
+  let explorationResult = null;
+  if (!profileLoaded) {
+    console.log(LOG_PREFIX, 'No profile found — running auto-exploration...');
+    try {
+      explorationResult = explorer.explore();
+      console.log(LOG_PREFIX, 'Auto-exploration complete:', explorationResult.confidence, 'confidence');
+
+      // Auto-save learned app profile
+      const appPatch = {
+        appName: explorationResult.app || appName,
+        version: '1.0',
+        selectors: {
+          blocks: explorationResult.suggestedSelectors || {}
+        },
+        editMethod: {
+          primary: explorationResult.suggestedEditMethod || 'execCommand',
+          requiresNativeEvents: false,
+          saveRequired: false,
+          saveMethod: 'auto'
+        },
+        quirks: (explorationResult.suggestedQuirks || []).map(q => ({
+          description: typeof q === 'string' ? q : q.description,
+          confidence: 'tentative',
+          source: 'auto'
+        })),
+        meta: {
+          confidence: explorationResult.confidence === 'high' ? 'inferred' : 'tentative'
+        }
+      };
+
+      // Detect save mechanism from actions
+      const saveAction = (explorationResult.detectedActions || []).find(
+        a => a.action === 'save' && a.viable
+      );
+      if (saveAction) {
+        appPatch.editMethod.saveRequired = true;
+        appPatch.editMethod.saveMethod = saveAction.method;
+      }
+
+      // Save app-level profile
+      try {
+        await StorageClient.updateApp(domain, appPatch, { source: 'auto' });
+        console.log(LOG_PREFIX, 'Auto-saved app profile for:', domain);
+      } catch (saveErr) {
+        console.warn(LOG_PREFIX, 'Failed to auto-save app profile:', saveErr.message);
+      }
+
+      // Save instance-level profile
+      const instancePatch = {
+        domain,
+        url: window.location.href,
+        title: document.title || '',
+        structure: {
+          totalBlocks: (explorationResult.detectedBlocks || []).reduce((sum, b) => sum + b.count, 0),
+          blockTypes: Object.fromEntries(
+            (explorationResult.detectedBlocks || []).map(b => [b.type, b.count])
+          ),
+          lastScanned: Date.now()
+        }
+      };
+      try {
+        await StorageClient.updateInstance(instanceId, instancePatch);
+        console.log(LOG_PREFIX, 'Auto-saved instance profile for:', instanceId);
+      } catch (saveErr) {
+        console.warn(LOG_PREFIX, 'Failed to auto-save instance profile:', saveErr.message);
+      }
+
+      // Reload profile after saving
+      try {
+        appProfile = await StorageClient.getProfile(domain);
+        profileLoaded = appProfile !== null;
+        if (profileLoaded) profileStatus = 'learned';
+      } catch (_) { /* ignore */ }
+    } catch (err) {
+      console.warn(LOG_PREFIX, 'Auto-exploration failed:', err.message);
+    }
+  }
+
   // Get initial block count for the status panel
   let initialBlockCount = 0;
   try {
@@ -423,26 +529,30 @@ async function initBridge() {
     console.warn(LOG_PREFIX, 'Initial content extraction failed:', err.message);
   }
 
-  // Build context from loaded profile
+  // Build context from loaded profile (or auto-exploration results)
+  const activeProfile = profileLoaded ? (mergeProfiles(appProfile, instanceProfile)) : effectiveProfile;
   const context = {
-    knownBlocks: (effectiveProfile.selectors && effectiveProfile.selectors.blocks)
-      ? Object.entries(effectiveProfile.selectors.blocks).map(([type, entry]) => ({
+    knownBlocks: (activeProfile.selectors && activeProfile.selectors.blocks)
+      ? Object.entries(activeProfile.selectors.blocks).map(([type, entry]) => ({
           type,
           selector: entry.value || entry,
           confidence: entry.confidence || 'unknown'
         }))
       : [],
-    availableActions: (effectiveProfile.actions)
-      ? Object.entries(effectiveProfile.actions).map(([action, entry]) => ({
+    availableActions: (activeProfile.actions)
+      ? Object.entries(activeProfile.actions).map(([action, entry]) => ({
           action,
           method: entry.method || 'unknown',
           confidence: entry.confidence || 'unknown'
         }))
       : [],
-    quirks: (effectiveProfile.quirks || []).map(q =>
+    quirks: (activeProfile.quirks || []).map(q =>
       typeof q === 'string' ? q : (q.description || String(q))
     ),
-    confidence: (effectiveProfile.meta && effectiveProfile.meta.confidence) || 'unknown'
+    confidence: (activeProfile.meta && activeProfile.meta.confidence) || 'unknown',
+    // Include auto-exploration summary if this was a first visit
+    autoExplored: explorationResult !== null,
+    explorationSummary: explorationResult ? explorationResult.rawDomSummary : null
   };
 
   // Step 5: Inject window.__claudeBridge

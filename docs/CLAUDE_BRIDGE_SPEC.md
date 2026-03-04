@@ -60,20 +60,32 @@ Claude Bridge is a Chrome Extension that acts as the **eyes and hands** for Clau
 
 ### Core Principles
 
+- **Works with ANY web editor.** The extension injects on every page and auto-detects editable content. No pre-configuration needed.
 - **Extension = perception + execution.** It reads DOM structure, maps editable regions, and applies changes using each editor's native API.
 - **Claude = reasoning + instruction.** It reads the content snapshot, reasons about the desired change, and issues precise commands.
+- **Auto-learns on first visit.** When encountering an unknown editor, the bridge automatically explores the DOM, identifies block types, detects edit methods, and saves a profile.
 - **Knowledge persists.** What Claude learns about an app or a specific site instance is stored in `chrome.storage.local` and reused automatically.
-- **App knowledge is universal.** Knowledge about Google Sites editor behavior applies to all Google Sites instances.
+- **App knowledge is universal.** Knowledge about an editor's behavior applies to all instances of that editor.
 - **Instance knowledge is specific.** Page names, block counts, and site-specific quirks are stored per instance.
+- **Continuous learning.** Every interaction improves the bridge's understanding. Failed edits are learning opportunities — the bridge discovers what works and saves it.
 - **No local server required.** Everything lives inside the Chrome extension. No Node.js process, no native messaging host, no external dependencies.
 
-### Supported Editors (Initial)
+### Supported Editors
 
-| App | Domain | Adapter |
-|-----|--------|---------|
-| Google Sites | `sites.google.com` | `GoogleSitesAdapter` |
-| Google Docs | `docs.google.com` | `GoogleDocsAdapter` |
-| Any contenteditable page | `*` | `GenericAdapter` (fallback) |
+The bridge has optimized adapters for known editors and a universal fallback for everything else:
+
+| App | Domain | Adapter | Notes |
+|-----|--------|---------|-------|
+| Google Sites | `sites.google.com` | `GoogleSitesAdapter` | Pre-configured selectors and edit methods |
+| Google Docs | `docs.google.com` | `GoogleDocsAdapter` | Keyboard simulation for editing |
+| **Any web editor** | `*` | `GenericAdapter` | Auto-detects Quill, ProseMirror, CKEditor, TinyMCE, contenteditable, textarea, input fields |
+
+The Generic adapter is the **default for all unknown sites**. It handles:
+- Rich-text editors (Quill, ProseMirror, CKEditor 4/5, TinyMCE)
+- Raw contenteditable regions
+- Textareas and input fields
+- React/Vue/Angular form fields (uses native value setters)
+- Any page with editable content
 
 ### Communication Model
 
@@ -262,7 +274,7 @@ claude-bridge/
 
   "content_scripts": [
     {
-      "matches": ["https://sites.google.com/*", "https://docs.google.com/*"],
+      "matches": ["https://*/*", "http://*/*"],
       "js": ["dist/content.js"],
       "run_at": "document_idle",
       "all_frames": false
